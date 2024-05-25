@@ -1,0 +1,7 @@
+include "/usr/local/share/themes/Adapta/gtk-2.0/gtkrc"
+style "user-font" {
+	font_name = "Droid Sans 12"
+}
+widget_class "*" style "user-font"
+gtk-font-name="Droid Sans 12"
+gtk-cursor-theme-name=capitaine-cursors
