@@ -1,0 +1,141 @@
+#!/bin/sh
+#
+# Copyright (c) 2021, The NomadBSD Project
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# * Redistributions of source code must retain the above copyright notice, this
+#   list of conditions and the following disclaimer.
+#
+# * Redistributions in binary form must reproduce the above copyright notice,
+#   this list of conditions and the following disclaimer in the documentation
+#   and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+
+#
+# This script batch builds the image for amd64, mac, and i386.
+#
+
+. ./common
+
+sha256_chksum()
+{
+  printmsg "Calculating sha256 checksum for $1 ..."
+  sha256 "$1" > "$1".sha256
+}
+
+lzma_compress()
+{
+  printmsg "Compressing $1 ..."
+  lzma -k -9 "$1"
+}
+
+post_process()
+{
+  sha256_chksum "$1"
+  lzma_compress "$1"
+  sha256_chksum "$1".lzma
+}
+
+call_build()
+{
+  if ! ./build $*; then
+    printerr "Build command '$*' failed."
+    exit 1
+  fi
+}
+
+create_manifest()
+{
+  pkg -c "${SYSDIR}" info > "$1"
+}
+
+clean()
+{
+  printmsg "Cleaning ..."
+  ./build clean
+}
+
+usage()
+{
+  echo "Usage: release [-h]|[-P]"
+}
+
+help()
+{
+  echo "Options:"
+  echo "-P  Do not compress images or calculate checksums."
+  echo "-h  This one."
+}
+
+no_post_process=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+  -P)
+    no_post_process=1
+    ;;
+  -h)
+    usage
+    help
+    exit 0
+    ;;
+  -*)
+    printerr "Invalid option '$1'"
+    usage
+    exit 1
+    ;;
+  *)
+    break
+    ;;
+  esac
+  shift
+done
+
+clean
+
+# Order of arch is important. After building the amd64 image we can
+# use most of it for the mac image.
+for arch in amd64 mac; do
+  for fs in ufs zfs; do
+    image=$(imagename ${arch} ${fs})
+    printmsg "Building ${image} ..."
+    if [ ${arch} = "mac" ]; then
+      # There is no need to rebuild everything for the mac image
+      call_build -a ${arch} -f ${fs} image
+      if [ ${fs} = "zfs" ]; then
+        create_manifest "${image%${fs}.img}manifest"
+      fi
+    elif [ ${arch} = "amd64" ]; then
+      if [ ${fs} = "zfs" ]; then
+        call_build -a ${arch} -f ${fs} image
+        create_manifest "${image%${fs}.img}manifest"
+      else
+        call_build -a ${arch} -f ${fs} all
+      fi
+    fi
+    [ ${no_post_process} -eq 0 ] && post_process "${image}"
+  done
+done
+
+# In case of i386 just build a UFS image.
+clean
+image=$(imagename i386 UFS)
+printmsg "Building ${image} ..."
+call_build -a i386 -f UFS all
+create_manifest "${image%ufs.img}manifest"
+[ ${no_post_process} -eq 0 ] && post_process "${image}"
+
+exit 0

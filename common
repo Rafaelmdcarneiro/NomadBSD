@@ -1,0 +1,130 @@
+#
+# Copyright (c) 2021, The NomadBSD Project
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# * Redistributions of source code must retain the above copyright notice, this
+#   list of conditions and the following disclaimer.
+#
+# * Redistributions in binary form must reproduce the above copyright notice,
+#   this list of conditions and the following disclaimer in the documentation
+#   and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+
+. ./build.cfg
+
+cecho()
+{
+  local ansi_str ansi_reset=$'\e[0m'
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+    -c)
+      shift
+      local color=$1
+      for c in black.0 red.1 green.2 yellow.3 \
+               blue.4 magenta.5 cyan.6 white.7; do
+        if [ ${c%%.*} = ${color} ]; then
+          local color_code=${c##*.}
+          ansi_str=${ansi_str}$'\e['3${color_code}m
+          break
+        fi
+      done
+      ;;
+    -b)
+      # Bold
+      ansi_str=${ansi_str}$'\e[1m'
+      ;;
+    -*)
+      echo "Invalid option '$1'" >&2
+      ;;
+    *)
+      break
+      ;;
+    esac
+    shift
+  done
+  if [ ! -t 1 ]; then
+    ansi_str=""
+    ansi_reset=""
+  fi
+  echo ${ansi_str}$*${ansi_reset}
+}
+
+printwarn()
+{
+  [ $# -gt 0 ] && cecho -c yellow -b "Warning:" $* >&2
+}
+
+printerr()
+{
+  [ $# -gt 0 ] && cecho -c red -b "Error:" $* >&2
+}
+
+printmsg()
+{
+  [ $# -gt 0 ] && cecho -c cyan -b $* >&2
+}
+
+#
+# Returns the shortened, current git commit ID, or the tag if given.
+#
+get_version()
+{
+  cid=$(git log --oneline | cut -f1 -d' ' | head -1)
+  version=$(git tag --contains "${cid}" | head -1)
+  [ -z "${version}" ] && version="${cid}"
+  echo "${version}"
+}
+
+#
+# Returns an abbreviated base system version string
+#
+get_baseversion()
+{
+  echo ${RELEASE} | tr -d '.' | awk -F'[-]+' '{
+    v = $1
+    if ($2 == "RELEASE") s = "R"
+    else if ($2 == "CURRENT") s = "C"
+    else if ($2 == "STABLE") s = "S"
+    else if ($2 ~ /BETA/) {
+      n = substr($2, 5);
+      s = sprintf("B%d", n)
+    } else if ($2 ~ /ALPHA/) {
+      n = substr($2, 6);
+      s = sprintf("A%d", n);
+    } else s = $2
+    p = ""
+    if (NF >= 3)
+      p = $3
+    printf("%d%s%s", v, s, p);
+  }'
+}
+
+#
+# Creates an image name of the form
+# nomadbsd-<base version>-<git tag/ID>.<arch>.img
+#
+imagename()
+{
+  local arch=$1 filesystem=$2
+  local version=$(get_version)
+  local baseversion=$(get_baseversion)
+  local fs=$(echo ${filesystem} | tr '[A-Z]' '[a-z]')
+  local image="nomadbsd"
+  image="nomadbsd-${baseversion}-${version}"
+  echo "${image}.${arch}.${fs}.img"
+}
